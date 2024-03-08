@@ -1,0 +1,137 @@
+---
+title: "Prototype"
+format: html
+editor: visual
+---
+
+# {mistral.ai} Prototype
+
+## Libraries
+
+```{r}
+library(httr2)
+library(testthat)
+library(purrr)
+library(dotenv)
+library(rlang)
+```
+
+## Functions
+
+```{r}
+
+mistral_key <- function(){
+  return(Sys.getenv("MISTRAL_KEY"))
+}
+
+mistral_headers <- function(){
+    return(
+      c(
+      `Content-Type` = "application/json",
+      `Accept` = "application/json",
+      `Authorization` = paste0("Bearer ", mistral_key())
+      )
+    )
+}
+
+mistral_models <- function(){
+  api_url <- "https://api.mistral.ai"
+  endpoint <- "/v1/models"
+  url <- paste0(api_url, endpoint)
+  
+  request <- request(url) |> 
+    req_headers(!!!mistral_headers())
+  
+  # How to: Do this request the first time use user uses it (directly or indirectly)
+  # and cache the response for X time to avoid using too much tokens for that.
+  response <- request |> 
+    req_perform() 
+  
+  model_ids <- resp_body_json(response, simplifyVector = T) |> 
+    pluck("data","id")
+  
+  return(model_ids)
+}
+
+mistral_chat <- function(model, message){
+  api_url <- "https://api.mistral.ai"
+  endpoint <- "/v1/chat/completions"
+  url <- paste0(api_url, endpoint)
+  
+  rlang::arg_match(model, values = mistral_models())
+  
+  request_data <- list(
+    model = model,
+    messages = list(
+      list(role = "user",
+           content = message)
+    )
+  )
+  
+  request <- 
+    request(url) %>%
+    req_headers(!!!mistral_headers()) %>%
+    req_body_json(data = request_data)
+  
+  response <- 
+    request |> 
+    req_perform() 
+  
+  answer <- response |> 
+    resp_body_json() |> 
+    pluck("choices", 1, "message", "content")
+  
+  return(answer)
+}
+
+
+```
+
+## Tests
+
+### API Key
+
+```{r}
+test_that("MISTRAL_KEY environment variable is correctly defined",{
+  dotenv::load_dot_env()
+  expect_true(!is.null(mistral_key()))
+})
+```
+
+### API URL
+
+#### Headers
+
+```{r}
+test_that("Headers are correctly constructed", {
+  expect_in(object = names(mistral_headers()),
+            expected = c("Content-Type", "Accept", "Authorization") 
+    )
+})
+```
+
+### API Calls
+
+#### Models
+
+```{r}
+test_that("Models can be retrieved using API", {
+  models <- mistral_models()
+  
+  expect_type(models, "character")
+  expect_contains(models, expected = "mistral-tiny")
+})
+```
+
+#### Chat
+
+```{r}
+test_that("chat function can communicate with mistral", {
+  answer <- 
+    mistral_chat(model = "mistral-tiny", 
+                message = "What is the result of 1 + 1 ? Answer with just the integer and no text.")
+  
+  expect_equal(as.integer(answer), expected = 2)
+})
+
+```
